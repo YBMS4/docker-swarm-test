@@ -1,6 +1,6 @@
 # Docker Swarm Testing
 
-*Veuillez utiliser le fichier ``README.francais.md`` si vous préférez la version francaise de ces explications.*
+***Veuillez utiliser le fichier ``README.francais.md`` si vous préférez la version francaise de ces explications.***
 
 In this repository, you'll find my deployment tests for both **Test** and **Production** environments using Docker Compose and Docker Swarm. As a Fullstack developer, mastering these powerful tools is essential.
 
