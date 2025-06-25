@@ -1,0 +1,148 @@
+
+services:
+
+  traefik:
+    image: traefik:v3.0
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "81:81"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/acme.json:/acme.json
+    networks:
+      - web
+      - monitoring
+    depends_on:
+      - prometheus
+      - grafana
+      - application
+      - server
+  
+  application: 
+    image: fullapp-application
+    build: "./application/"
+    command: npm start
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.application.entrypoints=web"
+      - "traefik.http.routers.application.rule=PathPrefix(`/`)"
+      - "traefik.http.services.application.loadbalancer.server.port=3000"
+    networks:
+      - web
+    depends_on:
+      - server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    develop:
+      watch: 
+        - action: sync
+          path: ./application/
+          target: /app
+          ignore: 
+            - .git
+            - node_modules
+            - .env
+            - .DS_Store
+            - .vscode
+
+  server:
+    image: fullapp-server
+    command: npm start
+    build: "./server/"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.server.entrypoints=web"
+      - "traefik.http.routers.server.rule=PathPrefix(`/api/`)"
+      - "traefik.http.services.server.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.server-stripper.stripprefix.prefixes=/api"
+      - "traefik.http.routers.server.middlewares=server-stripper@docker"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - web
+    
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090"
+    command:
+      - --web.route-prefix=/prometheus
+      - --web.external-url=http://localhost/prometheus
+      - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+    depends_on:
+      - node_exporter
+      - cAdvisor
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.entrypoints=monitoring"
+      - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.service=prometheus"
+      - "traefik.http.middlewares.prometheus-redirect.redirectregex.regex=^/prometheus$$"
+      - "traefik.http.middlewares.prometheus-redirect.redirectregex.replacement=/prometheus/"
+      - "traefik.http.routers.prometheus.middlewares=prometheus-redirect"
+
+  grafana: 
+    image: grafana/grafana
+    ports:
+      - "3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.entrypoints=monitoring"
+      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+  node_exporter:
+    image: prom/node-exporter
+    ports:
+      - "9100"
+    restart: always
+    networks:
+      - monitoring
+    volumes: 
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+  
+  cAdvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    ports:
+      - "8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+  web:
+    driver: bridge

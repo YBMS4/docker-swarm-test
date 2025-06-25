@@ -1,0 +1,15 @@
+entryPoints:
+  web:
+    address: "0.0.0.0:80"
+  monitoring:
+    address: "0.0.0.0:81"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false   # Par sécurité, ne pas exposer tous les containers par défaut
+
+api:
+  dashboard: true             # Dashboard Traefik activé
+  insecure: true             # Permet d'accéder au dashboard sans authentification (attention en prod !)
+  debug: true                # Activer le mode debug pour plus de logs

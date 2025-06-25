@@ -1,0 +1,38 @@
+services:
+  registry:
+    image: registry:2
+    ports:
+      - target: 5000
+      - publish: 5000
+      - mode: host
+    networks:
+      - registry-net
+
+    environment:
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Origin=["http://172.21.61.27:5050"] # Use your registry-ui exposed ip address.
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Methods=["HEAD","GET","OPTIONS","DELETE"]
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Credentials=["true"]
+      - REGISTRY_STORAGE_DELETE_ENABLED=["true"]
+
+  registry-ui:
+    image: joxit/docker-registry-ui:main
+    ports:
+      - "5050:80"
+    environment:
+      - REGISTRY_TITLE=My Local Registry
+      - REGISTRY_URL=http://172.21.61.27:5000 # Use your registry exposed ip address.
+      - SINGLE_REGISTRY=true
+      - DELETE_IMAGES=true
+      - SHOW_CONTENT_DIGEST=true
+      - SHOW_CATALOG_NB_TAGS=true
+      - CATALOG_MIN_BRANCHES=1
+      - CATALOG_MAX_BRANCHES=1
+      - TAGLIST_PAGE_SIZE=100
+      - REGISTRY_SECURED=false
+      - CATALOG_ELEMENTS_LIMIT=1000
+    networks:
+      - registry-net
+    
+networks:
+  registry-net:
+    driver: overlay

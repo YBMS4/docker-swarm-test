@@ -1,0 +1,155 @@
+version: "3.8"
+
+services:
+
+  traefik:
+    image: traefik:v3.0
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "81:81"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik-swarm.yml:/etc/traefik/traefik.yml
+      - ./traefik/acme.json:/acme.json
+    networks:
+      - web
+      - monitoring
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints: [node.role == manager]
+  
+  application: 
+    image: 127.0.0.1:5000/fullapp-application
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.application.entrypoints=web"
+        - "traefik.http.routers.application.rule=PathPrefix(`/`)"
+        - "traefik.http.services.application.loadbalancer.server.port=3000"
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  server:
+    image: 127.0.0.1:5000/fullapp-server
+    deploy: 
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+      mode: replicated
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.server.entrypoints=web"
+        - "traefik.http.routers.server.rule=PathPrefix(`/api/`)"
+        - "traefik.http.services.server.loadbalancer.server.port=3000"
+        - "traefik.http.middlewares.server-stripper.stripprefix.prefixes=/api"
+        - "traefik.http.routers.server.middlewares=server-stripper@swarm"
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  node_exporter:
+    image: prom/node-exporter
+    deploy:
+      mode: global
+    networks:
+      - monitoring
+    volumes: 
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+  
+  cAdvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    deploy:
+      mode: global
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - prometheus-volume:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - --web.route-prefix=/prometheus
+      - --web.external-url=http://localhost:81/prometheus
+      - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.prometheus.entrypoints=monitoring"
+        - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
+        - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+        - "traefik.http.routers.prometheus.service=prometheus"
+        - "traefik.http.middlewares.prometheus-redirect.redirectregex.regex=^/prometheus$$"
+        - "traefik.http.middlewares.prometheus-redirect.redirectregex.replacement=/prometheus/"
+        - "traefik.http.routers.prometheus.middlewares=prometheus-redirect"
+        # - "traefik.http.middlewares.prometheus-stripper.stripprefix.prefixes=/prometheus"
+        # - "traefik.http.routers.prometheus.middlewares=prometheus-stripper@swarm"
+    
+
+  grafana: 
+    image: grafana/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=http://localhost:81/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    networks:
+      - monitoring
+    volumes:
+      - grafana-volume:/var/lib/grafana
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.grafana.entrypoints=monitoring"
+        - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+        - "traefik.http.routers.grafana.service=grafana"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+        # - "traefik.http.middlewares.grafana-stripper.stripprefix.prefixes=/grafana"
+        # - "traefik.http.routers.grafana.middlewares=grafana-stripper@swarm"
+
+networks:
+  web:
+    driver: overlay
+  monitoring:
+    driver: overlay
+
+volumes:
+  prometheus-volume:
+    driver: local
+  grafana-volume:
+    driver: local
